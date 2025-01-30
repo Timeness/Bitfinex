@@ -1,4 +1,4 @@
-import { Bot } from "@grammyjs/core";
+import { Bot } from "grammy";
 import axios from "axios";
 import dotenv from "dotenv";
 
