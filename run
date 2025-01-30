@@ -1,1 +1,1 @@
-git pull && bot.js
+git pull && node bot.js
