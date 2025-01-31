@@ -1,67 +1,77 @@
 import { Bot } from "grammy";
 import axios from "axios";
+import { createChart } from "./chart.js";  // Chart generation
 import dotenv from "dotenv";
-
 dotenv.config();
 
 const bot = new Bot(process.env.BOT_TOKEN);
-const API_URL = "https://api.coinranking.com/v2/coins";
-const API_KEY = process.env.COINRANKING_API_KEY;
 
-async function fetchCoinData(coinName) {
+// Function to fetch crypto details from CryptoCompare API
+async function getCryptoDetails(symbol) {
+    const url = `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${symbol}&tsyms=USDT`;
+    
     try {
-        const response = await axios.get(API_URL, {
-            headers: { "x-access-token": API_KEY }
+        const response = await axios.get(url, {
+            headers: { 'Authorization': `Apikey ${process.env.CRYPTOCOMPARE_API_KEY}` }
         });
-
-        const coin = response.data.data.coins.find(c => c.symbol.toLowerCase() === coinName.toLowerCase());
-
-        if (!coin) return null;
-
+        
+        const data = response.data.RAW[symbol.toUpperCase()].USDT;
+        
         return {
-            name: coin.name,
-            symbol: coin.symbol,
-            price: parseFloat(coin.price).toFixed(2),
-            change24h: coin.change,
-            athPrice: coin.allTimeHigh.price,
-            athDate: coin.allTimeHigh.timestamp,
-            marketCap: coin.marketCap,
-            volume24h: coin["24hVolume"],
-            circulatingSupply: coin.supply.circulating,
-            high24h: coin.sparkline[coin.sparkline.length - 1], // Approximation
-            low24h: Math.min(...coin.sparkline),
+            price: data.PRICE.toFixed(2),
+            change_24h: data.CHANGE24H.toFixed(2),
+            change_7d: data.CHANGE7D.toFixed(2),
+            change_30d: data.CHANGE30D.toFixed(2),
+            high_24h: data.HIGH24H.toFixed(2),
+            low_24h: data.LOW24H.toFixed(2),
+            volume_24h: data.VOLUME24H.toFixed(2),
+            market_cap: data.MKTCAP.toFixed(2),
+            circulating_supply: data.SUPPLY.toFixed(2),
+            all_time_high: data.ALLTIMEHIGH.toFixed(2),
+            ath_days: Math.floor((Date.now() - new Date(data.ALLTIMEHIGH_TIMESTAMP * 1000)) / (1000 * 60 * 60 * 24)),
+            all_time_low: data.ALLTIMEMIN.toFixed(2),
+            atl_days: Math.floor((Date.now() - new Date(data.ALLTIMEMIN_TIMESTAMP * 1000)) / (1000 * 60 * 60 * 24))
         };
     } catch (error) {
-        console.error("API Error:", error.message);
+        console.error("Error fetching crypto details:", error);
         return null;
     }
 }
 
-bot.command("start", (ctx) => ctx.reply("Welcome! Use /price [symbol] to get market info. Example: /price BTC"));
+// Command to fetch crypto details
+bot.command("p", async (ctx) => {
+    const symbol = ctx.match?.toUpperCase() || "BTC";
+    
+    const crypto = await getCryptoDetails(symbol);
+    if (!crypto) {
+        return ctx.reply("❌ Failed to fetch crypto details.");
+    }
 
-bot.command("price", async (ctx) => {
-    const args = ctx.message.text.split(" ");
-    if (args.length < 2) return ctx.reply("Usage: /price [symbol]");
+    // Generate chart for the symbol
+    const chartPath = await createChart(symbol);
 
-    const coinSymbol = args[1].toUpperCase();
-    const coinData = await fetchCoinData(coinSymbol);
+    // Format the response message
+    const message = `
+📊 *${symbol}/USDT Market Info*
 
-    if (!coinData) return ctx.reply("Coin not found!");
+  - *Price:* ${crypto.price} USDT
+  - *24h Price Change:* ${crypto.change_24h}%
+  - *7d Price Change:* ${crypto.change_7d}%
+  - *30d Price Change:* ${crypto.change_30d}%
+  - *24h High:* ${crypto.high_24h} USDT
+  - *24h Low:* ${crypto.low_24h} USDT
+  - *24h Volume:* ${crypto.volume_24h} USDT
+  - *All Time High:* ${crypto.all_time_high} USDT | ${crypto.ath_days} days ago
+  - *All Time Low:* ${crypto.all_time_low} USDT | ${crypto.atl_days} days ago
 
-    const replyText = `
-${coinData.name} (${coinData.symbol}) /USDT Market Info
+📈 *Statistics*:
+  - *Market Cap:* ${crypto.market_cap} USDT
+  - *Trading Volume:* ${crypto.volume_24h} USDT
+  - *Circulating Supply:* ${crypto.circulating_supply}
+  `;
 
-- Price: ${coinData.price} USDT
-- 24h Price Change: ${coinData.change24h}%
-- 24h High: ${coinData.high24h} USDT
-- 24h Low: ${coinData.low24h} USDT
-- Market Cap: ${coinData.marketCap} USDT
-- 24h Trading Volume: ${coinData.volume24h} USDT
-- Circulating Supply: ${coinData.circulatingSupply}
-- All-Time High: ${coinData.athPrice} USDT (since ${new Date(coinData.athDate * 1000).toLocaleDateString()})
-`;
-
-    ctx.reply(replyText);
+    // Send message and image
+    await ctx.replyWithPhoto({ source: chartPath }, { caption: message, parse_mode: "Markdown" });
 });
 
 bot.start();
